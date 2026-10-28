@@ -1,0 +1,157 @@
+1. Phản biện ý kiến của Developer
+Ý kiến của Developer:
+Chúng ta đã có Spring Cloud Gateway đảm nhiệm việc gom API rồi, tại sao vẫn phải tốn tài nguyên chạy thêm Nginx ở phía trước nó nữa? Bỏ Nginx đi, mở cổng 80 cho Spring Gateway luôn!
+
+Phản biện dưới góc nhìn Software Architect:
+
+Lập luận này có một điểm hợp lý: Nginx và Spring Cloud Gateway đều có khả năng định tuyến HTTP, vì vậy nhìn bề ngoài chúng có vẻ trùng lặp chức năng.
+
+Tuy nhiên, định tuyến HTTP chỉ là một phần trong trách nhiệm của mỗi thành phần. Nginx thường hoạt động ở tầng rìa mạng (Edge Network), tiếp nhận và xử lý lưu lượng từ bên ngoài. Trong khi đó, Spring Cloud Gateway đảm nhiệm định tuyến API và xử lý các yêu cầu liên quan đến kiến trúc ứng dụng Microservices.
+
+Việc loại bỏ Nginx có thể làm giảm số thành phần cần vận hành, nhưng đồng thời cũng chuyển thêm trách nhiệm tiếp nhận lưu lượng Internet sang tầng ứng dụng Java. Đây không đơn thuần là quyết định loại bỏ một thành phần trùng lặp, mà là quyết định thay đổi ranh giới trách nhiệm và kiến trúc bảo vệ hệ thống.
+2. So sánh vai trò của Nginx và Spring Cloud Gateway
+2.1. Nginx — Lớp bảo vệ tại Edge Network
+Nginx là web server và reverse proxy hiệu năng cao, phù hợp để xử lý lưu lượng HTTP ở phía trước hệ thống ứng dụng.
+
+Các thế mạnh chính:
+Chức năng	Vai trò của Nginx
+Reverse proxy	Tiếp nhận request từ Client và chuyển tiếp đến upstream phù hợp.
+Static content	Phục vụ HTML, CSS, JavaScript, hình ảnh và các tài nguyên tĩnh mà không cần đi qua ứng dụng Java.
+SSL/TLS termination	Kết thúc kết nối HTTPS tại Edge, giải mã TLS rồi chuyển tiếp request đến tầng ứng dụng.
+Rate limiting	Giới hạn tần suất request theo các tiêu chí cấu hình, giúp giảm tải cho hệ thống phía sau.
+Kiểm soát lưu lượng	Giới hạn kích thước request body, thời gian chờ và một số đặc tính của kết nối.
+Load balancing	Phân phối request đến các upstream backend theo cấu hình.
+
+
+Tại sao Nginx phù hợp ở Edge Network?
+
+Nginx có thể xử lý nhiều tác vụ HTTP phổ biến mà không cần khởi chạy hoặc sử dụng tài nguyên của JVM cho từng tác vụ đó. Ví dụ, khi Client yêu cầu một file CSS, Nginx có thể phục vụ trực tiếp file này thay vì chuyển request qua Spring Cloud Gateway rồi đến một dịch vụ khác.
+
+Nginx cũng cung cấp cơ chế giới hạn lưu lượng và kích thước request trước khi chúng đi sâu vào hệ thống. Điều này giúp giảm lượng tải không cần thiết lên API Gateway và các Microservices.
+
+Tuy nhiên, cần phân biệt rõ: Nginx hỗ trợ giảm thiểu một số dạng lưu lượng bất thường, nhưng bản thân Nginx không thay thế một hệ thống chống DDoS chuyên dụng. Các cuộc tấn công quy mô lớn có thể cần thêm CDN, WAF hoặc dịch vụ bảo vệ ở tầng mạng của nhà cung cấp cloud.
+2.2. Spring Cloud Gateway — Lớp định tuyến API và xử lý logic ứng dụng
+Spring Cloud Gateway được thiết kế để xây dựng API Gateway trong hệ sinh thái Spring.
+
+Các thế mạnh chính:
+Chức năng	Vai trò của Spring Cloud Gateway
+API routing	Định tuyến API đến các Microservices dựa trên path, host, header hoặc những điều kiện khác.
+JWT authentication	Xác thực JWT và kiểm tra thông tin xác thực thông qua các filter hoặc tích hợp Spring Security.
+Service Discovery	Có thể tích hợp Eureka để định tuyến đến các dịch vụ được đăng ký và khám phá động.
+Gateway filters	Biến đổi request/response, thêm header, xử lý lỗi và thực hiện logic xuyên suốt các API.
+Load balancing	Có thể kết hợp Spring Cloud LoadBalancer và service discovery để phân phối request đến các instance.
+Application observability	Tích hợp với hệ sinh thái Spring để ghi log, thu thập metrics và tracing.
+
+
+Tại sao Spring Cloud Gateway phù hợp ở tầng ứng dụng?
+
+Giả sử hệ thống E-Commerce có các dịch vụ:
+- auth-service: xác thực và quản lý tài khoản.
+- product-service: quản lý sản phẩm.
+- order-service: quản lý đơn hàng.
+- payment-service: xử lý thanh toán.
+Spring Cloud Gateway có thể định tuyến /api/products/** đến Product Service và /api/orders/** đến Order Service. Khi tích hợp Eureka, Gateway có thể tìm các instance đã đăng ký thay vì phải cấu hình cứng địa chỉ IP của từng dịch vụ.
+
+Gateway cũng có thể xác thực JWT, áp dụng các quy tắc truy cập và thực hiện những thao tác liên quan đến API trước khi chuyển tiếp request.
+
+Một lưu ý quan trọng: việc xác thực JWT tại Gateway không đồng nghĩa các Microservices có thể bỏ qua mọi kiểm tra bảo mật. Các dịch vụ vẫn cần bảo vệ những tài nguyên nhạy cảm và thực thi quyền truy cập phù hợp với mô hình bảo mật của hệ thống.
+3. Tại sao không nên mặc định bỏ Nginx?
+Vấn đề cốt lõi không nằm ở việc hai thành phần có cùng khả năng định tuyến hay không, mà là chúng đang giải quyết vấn đề ở những tầng khác nhau.
+
+Có thể hình dung kiến trúc theo ba nhóm trách nhiệm:
+- Edge Network: tiếp nhận lưu lượng bên ngoài, xử lý TLS, phục vụ nội dung tĩnh và giới hạn request.
+- API Gateway: định tuyến API, xác thực ở tầng ứng dụng và tích hợp service discovery.
+- Microservices: thực thi nghiệp vụ như quản lý sản phẩm, đơn hàng và thanh toán.
+Nếu bỏ Nginx, Spring Cloud Gateway vẫn có thể đảm nhiệm định tuyến, TLS termination và một số cơ chế giới hạn lưu lượng. Do đó, việc bỏ Nginx không khiến hệ thống tự động mất khả năng hoạt động.
+
+Tuy nhiên, kiến trúc khi đó sẽ tập trung nhiều trách nhiệm hơn vào API Gateway. Điều này có thể khiến ứng dụng phải đảm nhận thêm các công việc vốn có thể được xử lý ở lớp Edge, đồng thời làm giảm sự tách biệt giữa hạ tầng tiếp nhận lưu lượng và logic định tuyến ứng dụng.
+
+Ngược lại, việc giữ Nginx cũng không có nghĩa là phải cấu hình mọi chức năng trên cả hai lớp. Nếu cả Nginx và Spring Cloud Gateway cùng thực hiện một quy tắc rate limit mà không có chủ đích, hệ thống có thể xuất hiện cấu hình trùng lặp, khó kiểm soát hoặc giới hạn request không như mong muốn.
+
+Vì vậy, Software Architect nên xác định rõ trách nhiệm của từng thành phần, thay vì chỉ so sánh số lượng chức năng mà chúng có thể thực hiện.
+4. Sơ đồ luồng dữ liệu chuẩn
+Kiến trúc đề xuất cho hệ thống Microservices:
+                         INTERNET
+                            |
+                            v
+                    +----------------+
+                    |     Client     |
+                    +----------------+
+                            |
+                         HTTPS
+                            |
+                            v
+              +----------------------------+
+              |       NGINX (EDGE)         |
+              |----------------------------|
+              | TLS Termination            |
+              | Static Content             |
+              | Rate Limiting              |
+              | Request Size Limits        |
+              | Reverse Proxy               |
+              +----------------------------+
+                            |
+                   HTTP hoặc HTTPS
+                 trong mạng nội bộ
+                            |
+                            v
+              +----------------------------+
+              | Spring Cloud Gateway       |
+              |----------------------------|
+              | JWT Authentication         |
+              | API Routing                |
+              | Gateway Filters            |
+              | Eureka Integration         |
+              +----------------------------+
+                            |
+                  Service Discovery /
+                   Load Balancing
+                            |
+              +-------------+-------------+
+              |             |             |
+              v             v             v
+       +-------------+ +-------------+ +-------------+
+       | Product     | | Order       | | Payment     |
+       | Service     | | Service     | | Service     |
+       +-------------+ +-------------+ +-------------+
+              |             |             |
+              +-------------+-------------+
+                            |
+                     Database / Broker
+
+Luồng xử lý một request
+Ví dụ Client gửi request GET /api/products/123:
+1. Client: gửi HTTPS request đến địa chỉ công khai của hệ thống.
+2. Nginx: tiếp nhận kết nối, thực hiện TLS termination, kiểm tra các giới hạn lưu lượng đã cấu hình và chuyển request đến Spring Cloud Gateway.
+3. Spring Cloud Gateway: xác thực JWT nếu endpoint yêu cầu, đánh giá các điều kiện định tuyến và xác định dịch vụ đích.
+4. Service Discovery: nếu sử dụng Eureka, Gateway có thể tìm các instance của Product Service thông qua cơ chế tích hợp service discovery và load balancing.
+5. Product Service: xử lý nghiệp vụ, truy vấn dữ liệu và trả kết quả.
+6. Response: kết quả quay trở lại qua Gateway và Nginx trước khi đến Client.
+Đối với tài nguyên tĩnh như file CSS, Nginx có thể phục vụ trực tiếp mà không cần chuyển request qua API Gateway, tùy theo cách triển khai frontend.
+
+Lưu ý về TLS: Nếu Nginx kết thúc HTTPS và chuyển tiếp bằng HTTP, lưu lượng từ Nginx đến Gateway cần được bảo vệ bằng các biện pháp phù hợp với môi trường triển khai. Với hệ thống phân tán hoặc mạng không đáng tin cậy, có thể sử dụng HTTPS nội bộ hoặc mTLS.
+5. Phân chia trách nhiệm để tránh trùng lặp
+Một thiết kế tốt không phải là thiết kế có nhiều lớp nhất, mà là thiết kế trong đó mỗi lớp có trách nhiệm rõ ràng.
+Trách nhiệm	Nginx	Spring Cloud Gateway
+Tiếp nhận lưu lượng công khai	Chính	Không nên là điểm tiếp nhận trực tiếp trong kiến trúc đề xuất
+TLS termination tại Edge	Chính	Có thể hỗ trợ TLS nếu cần
+Phục vụ file tĩnh	Chính	Không phải thế mạnh chính
+Giới hạn request body ở Edge	Chính	Có thể bổ sung giới hạn ở tầng ứng dụng
+Rate limiting ở Edge	Chính	Có thể thực hiện rate limiting theo API, người dùng hoặc nghiệp vụ
+Xác thực JWT	Có thể thực hiện một số cơ chế xác thực phù hợp	Chính trong kiến trúc này
+Định tuyến API theo nghiệp vụ	Định tuyến proxy cơ bản	Chính
+Eureka Service Discovery	Không phải chức năng cốt lõi	Chính
+Filter gắn với logic API	Hạn chế, không phải mục tiêu chính	Chính
+
+
+Điểm quan trọng là rate limiting có thể tồn tại ở cả hai lớp nhưng phục vụ các mục đích khác nhau. Nginx có thể bảo vệ Edge khỏi lượng request quá lớn, trong khi Gateway có thể áp dụng giới hạn theo người dùng, token hoặc nhóm API. Hai lớp cần được cấu hình có chủ đích, không phải sao chép nguyên xi cùng một quy tắc.
+6. Kết luận của Software Architect
+Ý kiến bỏ Nginx vì Spring Cloud Gateway đã có chức năng định tuyến là một cách nhìn quá tập trung vào tính năng, chưa xem xét đầy đủ ranh giới trách nhiệm của hệ thống.
+
+Trong kiến trúc được đề xuất:
+- Nginx là lớp Edge: tiếp nhận lưu lượng bên ngoài, xử lý TLS, phục vụ nội dung tĩnh và áp dụng các giới hạn request phù hợp.
+- Spring Cloud Gateway là lớp API: thực hiện định tuyến API, xác thực ở tầng ứng dụng, áp dụng gateway filter và tích hợp Eureka Service Discovery.
+- Microservices là lớp nghiệp vụ: xử lý các chức năng riêng biệt của hệ thống.
+Do đó, với hệ thống Microservices đang thiết kế, nên giữ Nginx ở phía trước Spring Cloud Gateway và phân chia trách nhiệm rõ ràng giữa hai lớp. Cách tiếp cận này giúp tách biệt việc quản lý lưu lượng ở rìa mạng khỏi logic định tuyến ứng dụng, đồng thời tạo điều kiện để phát triển, bảo mật và vận hành hệ thống có tổ chức hơn.
+
+Dù vậy, đây là quyết định kiến trúc dựa trên yêu cầu cụ thể, không phải quy tắc tuyệt đối cho mọi hệ thống. Một ứng dụng nhỏ có thể chỉ cần Spring Cloud Gateway nếu nó đáp ứng đầy đủ yêu cầu về TLS, bảo vệ lưu lượng, vận hành và phục vụ nội dung. Trong bối cảnh bài tập này, mục tiêu là xây dựng một hệ thống Microservices có phân tầng trách nhiệm rõ ràng, nên mô hình Nginx kết hợp Spring Cloud Gateway là lựa chọn hợp lý.
